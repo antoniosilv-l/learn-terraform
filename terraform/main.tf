@@ -4,21 +4,11 @@ terraform {
       source            = "hashicorp/aws"
       version           = "~> 5.0"
     }
-    docker = {
-      source            = "kreuzwerker/docker"
-      version           = "~> 3.0"
-    }
   }
 }
 
 provider "aws" {
   region                = "us-east-2"
-  endpoints {
-    s3                  = "http://localhost:4566"
-    sts                 = "http://localhost:4566"
-    ec2                 = "http://localhost:4566"
-    elb                 = "http://localhost:4566"
-  }
 }
 
 data "aws_vpc" "default" {
