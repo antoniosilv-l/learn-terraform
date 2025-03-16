@@ -17,6 +17,7 @@ provider "aws" {
     s3                  = "http://localhost:4566"
     sts                 = "http://localhost:4566"
     ec2                 = "http://localhost:4566"
+    elb                 = "http://localhost:4566"
   }
 }
 
@@ -46,9 +47,9 @@ variable "server_port" {
   default               = 8080
 }
 
-output "public_ip" {
-  description           = "O endereço IP público do servidor web"
-  value                 = aws_autoscaling_group.example.public_ip
+output "alb_dns_name" {
+  description           = "O nome de domínio do balanceador de carga"
+  value                 = aws_lb.example.dns_name
 }
 
 resource "aws_security_group" "instance" {
@@ -62,9 +63,89 @@ resource "aws_security_group" "instance" {
   }
 }
 
+resource "aws_security_group" "alb" {
+  name = "terraform-example-alb"
+
+  ingress {
+    from_port           = 80
+    to_port             = 80
+    protocol            = "tcp"
+    cidr_blocks         = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port           = 0
+    to_port             = 0
+    protocol            = "-1"
+    cidr_blocks         = ["0.0.0.0/0"]
+  }
+}
+
+resource "aws_lb" "example" {
+  name                  = "terraform-asg-example"
+  load_balancer_type    = "application"
+  subnets               = data.aws_subnets.default.ids
+  security_groups       = [aws_security_group.alb.id] 
+}
+
+resource "aws_lb_listener" "http" {
+  load_balancer_arn     = aws_lb.example.arn
+  port                  = 80
+  protocol              = "HTTP"
+
+  default_action {
+    type                = "fixed-response"
+
+    fixed_response {
+      content_type      = "text/plain"
+      message_body      = "404: page not found"
+      status_code       = 404
+    }
+  }
+  
+}
+
+resource "aws_lb_target_group" "asg" {
+  name                  = "terraform-asg-example"
+  port                  = var.server_port
+  protocol              = "HTTP"
+  vpc_id                = data.aws_vpc.default.id
+
+  health_check {
+    path                = "/"
+    protocol            = "HTTP"
+    matcher             = "200"
+    interval            = 15
+    timeout             = 3
+    healthy_threshold   = 2
+    unhealthy_threshold = 2
+  }
+  
+}
+
+resource "aws_lb_listener_rule" "asg" {
+  listener_arn          = aws_lb_listener.http.arn
+  priority              = 100
+
+  condition {
+    path_pattern {
+      values            = ["*"]
+    }
+  }
+
+  action {
+    type                = "forward"
+    target_group_arn    = aws_lb_target_group.asg.arn
+  }
+  
+}
+
 resource "aws_autoscaling_group" "exemplo" {
   launch_configuration  = aws_launch_configuration.example.name
   vpc_zone_identifier   = data.aws_subnets.default.ids 
+
+  target_group_arns     = [aws_lb_target_group.asg.arn]
+  health_check_type     = "ELB" 
 
   min_size              = var.scaling_ec2.min_size
   max_size              = var.scaling_ec2.max_size
@@ -90,19 +171,4 @@ resource "aws_launch_configuration" "example" {
   lifecycle {
     create_before_destroy = true
   }
-}
-
-resource "docker_container" "ec2_simulada" {
-  count               = var.scaling_ec2.min_size
-  name                = "fake-ec2-instance"
-  image               = "python:3.9-alpine"
-  ports {
-    internal          = var.server_port
-    external          = var.server_port + count.index
-  }
-
-  entrypoint          = ["/bin/sh", "-c"]
-  command = [
-    "mkdir -p /www && echo 'Olá do container ${count.index}!' > /www/index.html && cd /www && python3 -m http.server 8080"
-  ]
 }
