@@ -131,14 +131,16 @@ resource "aws_lb_listener_rule" "asg" {
 }
 
 resource "aws_autoscaling_group" "exemplo" {
-  launch_configuration  = aws_launch_configuration.example.name
-  vpc_zone_identifier   = data.aws_subnets.default.ids 
-
+  vpc_zone_identifier   = data.aws_subnets.default.ids
   target_group_arns     = [aws_lb_target_group.asg.arn]
-  health_check_type     = "ELB" 
-
+  health_check_type     = "ELB"
   min_size              = var.scaling_ec2.min_size
   max_size              = var.scaling_ec2.max_size
+
+  launch_template {
+    id      = aws_launch_template.example.id
+    version = "$Latest"
+  }
 
   tag {
     key                 = "Name"
@@ -147,18 +149,25 @@ resource "aws_autoscaling_group" "exemplo" {
   }
 }
 
-resource "aws_launch_configuration" "example" {
-  image_id              = "ami-0fb653ca2d3203ac1"
-  instance_type         = "t2.micro"
-  security_groups       = [aws_security_group.instance.id]
+resource "aws_launch_template" "example" {
+  name          = "terraform-asg-example"
+  image_id      = "ami-0fb653ca2d3203ac1"
+  instance_type = "t2.micro"
 
-  user_data = <<-EOF
+  vpc_security_group_ids = [aws_security_group.instance.id]
+
+  user_data = base64encode(<<-EOF
               #!/bin/bash
               echo "Olá mundo!" > index.xhtml
               nohup busybox httpd -f -p ${var.server_port} &
               EOF
-  
-  lifecycle {
-    create_before_destroy = true
+              )
+
+  tag_specifications {
+    resource_type = "instance"
+
+    tags = {
+      Name = "terraform-asg-example"
+    }
   }
 }
